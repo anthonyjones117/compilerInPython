@@ -1,3 +1,15 @@
+class LoopBreak(Exception):
+    def __init__(self):
+        super().__init__('`break` outside a loop')
+
+class LoopContinue(Exception):
+    def __init__(self):
+        super().__init__('`continue` outside a loop')
+
+class FuncReturn(Exception):
+    def __init__(self, val):
+        super().__init__('`return` outside a function')
+        self.val = val
 
 def skip_space(s, idx):
     while True:
@@ -159,8 +171,18 @@ def pl_eval(env, node):
             new_env = (dict(), env)
             if not pl_eval(new_env, cond):
                 break
-            ret = pl_eval(new_env, body)
+            try:
+                ret = pl_eval(new_env, body)
+            except LoopBreak:
+                break
+            except LoopContinue:
+                continue
         return ret
+    # break & continue
+    if node[0] == 'break' and len(node) == 1:
+        raise LoopBreak
+    if node[0] == 'continue' and len(node) == 1:
+        raise LoopContinue
 
     # conditional
     if len(node) in (3, 4) and node[0] in ('?', 'if'):
@@ -171,26 +193,68 @@ def pl_eval(env, node):
             return pl_eval(new_env, yes)
         else:
             return pl_eval(new_env, no)
+        
+    # function definition
+    if node[0] == 'def' and len(node) == 4:
+        _, name, args, body = node
+        # sanity checks
+        for arg_name in args:
+            if not isinstance(arg_name, str):
+                raise ValueError('bad argument name')
+        if len(args) != len(set(args)):
+            raise ValueError('duplicated arguments')
+        # add the function to the scope
+        dct, _ = env
+        key = (name, len(args))
+        if key in dct:
+            raise ValueError('duplicated function')
+        dct[key] = (args, body, env)
+        return
+    
+    # function call
+    if node[0] == 'call' and len(node) >= 2:
+        _, name, *args = node
+        key = (name, len(args))
+        fargs, fbody, fenv = name_loopup(env, key)[key]
+        # args
+        new_env = dict()
+        for arg_name, arg_val in zip(fargs, args):
+            new_env[arg_name] = pl_eval(env, arg_val)
+        # call
+        try:
+            return pl_eval((new_env, fenv), fbody)
+        except FuncReturn as ret:
+            return ret.val
+    # return
+    if node[0] == 'return' and len(node) == 1:
+        raise FuncReturn(None)
+    if node[0] == 'return' and len(node) == 2:
+        _, val = node
+        raise FuncReturn(pl_eval(env, val))
 
     raise ValueError('unknown expression')
 
 def test_eval():
     def f(s):
-        return pl_eval( (dict(),None), pl_parse_prog(s))
-
+        return pl_eval(None, pl_parse_prog(s))
     assert f('''
-        ;; first scope
-        (var a 1)
-        (var b (+ a 1))
-        ;; a=1, b=2
-        (do
-            ;; new scope
-            (var a (+ b 5))     ;; name collision
-            (set b (+ a 10))
-        )
-        ;; a=1, b=17
-        (* a b)
-    ''') == 17
+        (def fib (n)
+            (if (le n 0)
+                (then 0)
+                (else (+ n (call fib (- n 1))))))
+        (call fib 5)
+    ''') == 5 + 4 + 3 + 2 + 1
+    assert f('''
+        (def fib (n) (do
+            (var r 0)
+            (loop (gt n 0) (do
+                (set r (+ r n))
+                (set n (- n 1))
+            ))
+            (return r)
+        ))
+        (call fib 5)
+    ''') == 5 + 4 + 3 + 2 + 1
 
 def main():
     test_eval()
