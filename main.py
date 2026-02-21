@@ -11,6 +11,49 @@ class FuncReturn(Exception):
         super().__init__('`return` outside a function')
         self.val = val
 
+# the name scope linked list
+class Scope:
+    def __init__(self, prev):
+        # the parent scope
+        self.prev = prev
+        # the number of local variables seen
+        self.nlocal = 0
+        # Variable names to (type, index) tuples.
+        self.names = dict()
+
+# the compiler state
+class Func:
+    def __init__(self):
+        # the name scope
+        self.scope = Scope(None)
+        # the output: a list of instructions
+        self.code = []
+        # current number of local variable in the stack (non-temporary)
+        self.nvar = 0
+        # current number of variables (both locals and temporaries)
+        self.stack = 0
+
+    # allocate a temporary variable on the stack top and return its index
+    def tmp(self):
+        dst = self.stack
+        self.stack += 1
+        return dst
+    
+    # allocate a new local variable in the current scope
+    def add_var(self, name, tp):
+    # add it to the map
+        if name in self.scope.names:
+            raise ValueError('duplicated name')
+        self.scope.names[name] = (tp, self.nvar) # (type, index)
+        self.scope.nlocal += 1
+        # assign the index
+        assert self.stack == self.nvar
+        dst = self.stack
+        self.stack += 1
+        self.nvar += 1
+        return dst
+
+
 def skip_space(s, idx):
     while True:
         save = idx
@@ -233,6 +276,14 @@ def pl_eval(env, node):
         raise FuncReturn(pl_eval(env, val))
 
     raise ValueError('unknown expression')
+
+# lookup a name from a scope. returns a (type, index) tuple.
+def scope_get_var(scope, name):
+    while scope:
+        if name in scope.names:
+            return scope.names[name]
+        scope = scope.prev
+        return None, -1 # not found
 
 def test_eval():
     def f(s):
